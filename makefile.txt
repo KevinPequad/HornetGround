@@ -1,0 +1,4 @@
+g++ main.cpp imgui/imgui.cpp imgui/imgui_draw.cpp imgui/imgui_widgets.cpp imgui/imgui_tables.cpp imgui/backends/imgui_impl_glfw.cpp imgui/backends/imgui_impl_opengl3.cpp \
+-Iimgui -Iimgui/backends -I/usr/include/opencv4 -I/usr/include/GLFW \
+-lglfw -lGL -ldl -lpthread -lopencv_core -lopencv_imgproc -lopencv_highgui -lopencv_imgcodecs -o imgui_app
+
