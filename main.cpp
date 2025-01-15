@@ -8,18 +8,17 @@
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
 #include <GLFW/glfw3.h>
+#include <GL/gl3w.h> // OpenGL loader for textures
 
 #define SERVER_IP "192.168.102.188" // Replace with the server's IP address
 #define PORT 8080
-const int MAX_FRAME_SIZE = 150000; // 10kb
+const int MAX_FRAME_SIZE = 150000;
 
 void setup_imgui(GLFWwindow* window) {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGui_ImplGlfw_InitForOpenGL(window, true);
-
-    // Use a compatible GLSL version for Raspberry Pi
-    ImGui_ImplOpenGL3_Init("#version 300 es"); // For OpenGL ES 3.0
+    ImGui_ImplOpenGL3_Init("#version 300 es");
     ImGui::StyleColorsDark();
 }
 
@@ -29,6 +28,24 @@ void cleanup_imgui() {
     ImGui::DestroyContext();
 }
 
+// Helper function to create OpenGL texture from cv::Mat
+GLuint createTextureFromMat(const cv::Mat& mat) {
+    GLuint textureID;
+    glGenTextures(1, &textureID);
+    glBindTexture(GL_TEXTURE_2D, textureID);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    GLenum inputFormat = mat.channels() == 3 ? GL_BGR : GL_RED;
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, mat.cols, mat.rows, 0, inputFormat, GL_UNSIGNED_BYTE, mat.data);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    return textureID;
+}
+
 int main() {
     // Initialize GLFW
     if (!glfwInit()) {
@@ -36,13 +53,11 @@ int main() {
         return -1;
     }
 
-    // Set GLFW to use OpenGL ES
     glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
 
-    // Create a GLFW window
-    GLFWwindow* window = glfwCreateWindow(800, 600, "Signal Strength and Bytes", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(800, 600, "Signal Strength and Video", nullptr, nullptr);
     if (!window) {
         std::cerr << "Failed to create GLFW window." << std::endl;
         glfwTerminate();
@@ -52,7 +67,6 @@ int main() {
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
 
-    // Setup ImGui
     setup_imgui(window);
 
     // Networking setup
@@ -82,8 +96,9 @@ int main() {
     std::cout << "Connected to server." << std::endl;
 
     cv::Mat frame;
+    GLuint frameTexture = 0;
     int total_bytes_received = 0;
-    int signal_strength = 0; // Mock value for now; you can implement signal strength logic
+    int signal_strength = 0;
 
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
@@ -93,7 +108,7 @@ int main() {
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        // Step 1: Receive frame size
+        // Receive frame size
         int frame_size;
         int size_received = recv(sock, &frame_size, sizeof(frame_size), 0);
         if (size_received != sizeof(frame_size)) {
@@ -102,7 +117,6 @@ int main() {
         }
 
         frame_size = ntohl(frame_size);
-
         if (frame_size <= 0 || frame_size > MAX_FRAME_SIZE) {
             std::cerr << "Invalid frame size: " << frame_size << std::endl;
             break;
@@ -121,24 +135,27 @@ int main() {
 
         total_bytes_received += bytes_received;
 
-        // Mock signal strength logic (replace with actual implementation if available)
+        // Mock signal strength logic
         signal_strength = rand() % 100;
 
-        // Step 3: Decode frame
+        // Decode frame
         frame = cv::imdecode(buffer, cv::IMREAD_COLOR);
 
-        // Render the frame using ImGui
         if (!frame.empty()) {
-            cv::imshow("Received Video", frame);
-            if (cv::waitKey(1) == 'q') {
-                break;
+            if (frameTexture) {
+                glDeleteTextures(1, &frameTexture);
             }
+            frameTexture = createTextureFromMat(frame);
         }
 
         // ImGui UI
         ImGui::Begin("Network Stats");
         ImGui::Text("Signal Strength: %d%%", signal_strength);
         ImGui::Text("Total Bytes Received: %d", total_bytes_received);
+        if (frameTexture && !frame.empty()) {
+            ImGui::Text("Video Stream:");
+            ImGui::Image((void*)(intptr_t)frameTexture, ImVec2(frame.cols, frame.rows));
+        }
         ImGui::End();
 
         // Render ImGui
@@ -153,6 +170,9 @@ int main() {
     }
 
     // Cleanup
+    if (frameTexture) {
+        glDeleteTextures(1, &frameTexture);
+    }
     cleanup_imgui();
     glfwDestroyWindow(window);
     glfwTerminate();
@@ -160,4 +180,3 @@ int main() {
 
     return 0;
 }
-
